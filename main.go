@@ -21,12 +21,17 @@ type LotteryEntry struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Ticket    string `json:"ticket"`
+	Phone     string `json:"phone,omitempty"`
+	Email     string `json:"email,omitempty"`
 	CreatedAt string `json:"created_at"`
 }
 
 type AddEntryRequest struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Phone string `json:"phone,omitempty"`
+	Email string `json:"email,omitempty"`
 }
+
 
 var (
 	entries   []LotteryEntry
@@ -154,6 +159,8 @@ func addEntry(c *gin.Context) {
 		ID:        id,
 		Name:      name,
 		Ticket:    ticket,
+		Phone:     strings.TrimSpace(req.Phone),
+		Email:     strings.TrimSpace(req.Email),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	entries = append(entries, entry)
@@ -263,8 +270,11 @@ const landingHTML = `<!DOCTYPE html>
       margin: 0 0 1rem 0;
     }
     label { display: block; margin-bottom: 0.35rem; font-weight: 600; font-size: 0.9rem; color: var(--text); }
-    input[type="text"] {
+    section input[type="text"],
+    section input[type="email"] {
+      display: block;
       width: 100%;
+      max-width: 20rem;
       padding: 0.65rem 1rem;
       font-size: 1rem;
       font-family: inherit;
@@ -273,16 +283,18 @@ const landingHTML = `<!DOCTYPE html>
       border-radius: 8px;
       color: var(--text);
       transition: border-color 0.2s, box-shadow 0.2s;
+      margin-bottom: 0.75rem;
     }
-    input[type="text"]:focus {
+    section input[type="text"]:focus,
+    section input[type="email"]:focus {
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.2);
     }
     input::placeholder { color: var(--text-muted); }
-    button, .btn {
-      display: inline-block;
-      margin-top: 0.75rem;
+    section button, .btn {
+      display: block;
+      margin-top: 0.5rem;
       padding: 0.65rem 1.35rem;
       background: var(--accent);
       color: #fff;
@@ -409,6 +421,10 @@ const landingHTML = `<!DOCTYPE html>
     <h2>Add entry</h2>
     <label for="name">Name (unique)</label>
     <input type="text" id="name" placeholder="Your name" />
+    <label for="phone">Phone (optional)</label>
+    <input type="text" id="phone" placeholder="Phone" />
+    <label for="email">Email (optional)</label>
+    <input type="email" id="email" placeholder="Email" />
     <button type="button" id="add-btn">Add entry</button>
     <div id="add-msg" class="msg" style="display:none;"></div>
   </section>
@@ -426,6 +442,8 @@ const landingHTML = `<!DOCTYPE html>
     var addMsg = document.getElementById('add-msg');
     var addBtn = document.getElementById('add-btn');
     var nameInput = document.getElementById('name');
+    var phoneInput = document.getElementById('phone');
+    var emailInput = document.getElementById('email');
     var entriesList = document.getElementById('entries-list');
     var drawBtn = document.getElementById('draw-btn');
     var drawMsg = document.getElementById('draw-msg');
@@ -493,20 +511,23 @@ const landingHTML = `<!DOCTYPE html>
       drawMsgTimer = setTimeout(hideDrawMsg, MSG_AUTO_HIDE_MS);
     }
 
+    function renderEntries(arr) {
+      if (arr.length === 0) {
+        entriesList.innerHTML = '<span class="empty">No entries yet.</span>';
+        entriesList.className = 'empty';
+        return;
+      }
+      entriesList.className = '';
+      var table = '<table><thead><tr><th>Name</th><th>Ticket</th></tr></thead><tbody>';
+      arr.forEach(function(e) {
+        table += '<tr><td>' + escapeHtml(e.name) + '</td><td>' + escapeHtml(e.ticket) + '</td></tr>';
+      });
+      table += '</tbody></table>';
+      entriesList.innerHTML = table;
+    }
     function loadEntries() {
       fetch('/entries').then(function(r) { return r.json(); }).then(function(arr) {
-        if (arr.length === 0) {
-          entriesList.innerHTML = '<span class="empty">No entries yet.</span>';
-          entriesList.className = 'empty';
-        } else {
-          entriesList.className = '';
-          var table = '<table><thead><tr><th>Name</th><th>Ticket</th></tr></thead><tbody>';
-          arr.forEach(function(e) {
-            table += '<tr><td>' + escapeHtml(e.name) + '</td><td>' + escapeHtml(e.ticket) + '</td></tr>';
-          });
-          table += '</tbody></table>';
-          entriesList.innerHTML = table;
-        }
+        renderEntries(arr || []);
       }).catch(function() {
         entriesList.innerHTML = '<span class="error">Failed to load entries.</span>';
       });
@@ -520,16 +541,23 @@ const landingHTML = `<!DOCTYPE html>
     addBtn.addEventListener('click', function() {
       var name = nameInput.value.trim();
       if (!name) { showAddMsg('Enter a name.', true); return; }
+      var phone = phoneInput ? phoneInput.value.trim() : '';
+      var email = emailInput ? emailInput.value.trim() : '';
       addBtn.disabled = true;
+      var body = { name: name };
+      if (phone) body.phone = phone;
+      if (email) body.email = email;
       fetch('/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name })
+        body: JSON.stringify(body)
       }).then(function(r) {
         return r.json().then(function(data) {
           if (r.status === 201) {
             showAddMsg('Your ticket: ' + data.ticket, false);
             nameInput.value = '';
+            if (phoneInput) phoneInput.value = '';
+            if (emailInput) emailInput.value = '';
             loadEntries();
           } else if (r.status === 409) {
             showAddMsg('Name already registered.', true);
