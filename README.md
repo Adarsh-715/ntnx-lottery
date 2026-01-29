@@ -18,11 +18,11 @@ go mod tidy
 go run .
 ```
 
-Server listens on port 8080 by default (set `PORT` to use another port). Then:
+Server listens on port 9191 by default (set `PORT` to use another port). Then:
 
-- **Landing:** http://localhost:8080/ — click **Open Swagger UI**
-- **Swagger UI:** http://localhost:8080/swagger — try GET /entries and POST /entries
-- **OpenAPI spec:** http://localhost:8080/openapi.yaml
+- **Landing:** http://localhost:9191/ — click **Open Swagger UI**
+- **Swagger UI:** http://localhost:9191/swagger — try GET /entries and POST /entries
+- **OpenAPI spec:** http://localhost:9191/openapi.yaml
 
 ## Create a GitHub repo and push this project
 
