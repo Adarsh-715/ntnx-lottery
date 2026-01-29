@@ -1,0 +1,71 @@
+openapi: 3.0.3
+info:
+  title: Lottery API
+  version: 1.0.0
+  description: Small API for adding and listing lottery entries.
+
+paths:
+  /entries:
+    get:
+      summary: List lottery entries
+      operationId: listEntries
+      tags:
+        - entries
+      responses:
+        "200":
+          description: List of all lottery entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LotteryEntry"
+    post:
+      summary: Add lottery entry
+      operationId: addEntry
+      tags:
+        - entries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddEntryRequest"
+      responses:
+        "201":
+          description: Lottery entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LotteryEntry"
+        "400":
+          description: Invalid request (missing name or ticket)
+
+components:
+  schemas:
+    LotteryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique entry identifier
+        name:
+          type: string
+          description: Name of the participant
+        ticket:
+          type: string
+          description: Lottery ticket number or code
+        created_at:
+          type: string
+          format: date-time
+          description: When the entry was created
+    AddEntryRequest:
+      type: object
+      required:
+        - name
+        - ticket
+      properties:
+        name:
+          type: string
+        ticket:
+          type: string

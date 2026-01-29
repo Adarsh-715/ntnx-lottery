@@ -1,0 +1,4 @@
+/lottery-api
+*.exe
+*.test
+.DS_Store
