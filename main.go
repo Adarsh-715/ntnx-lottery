@@ -28,6 +28,7 @@ type AddEntryRequest struct {
 	Name string `json:"name"`
 }
 
+
 var (
 	entries   []LotteryEntry
 	entriesMu sync.RWMutex
@@ -43,6 +44,7 @@ func main() {
 
 	r.GET("/entries", listEntries)
 	r.POST("/entries", addEntry)
+	r.DELETE("/entries/:id", deleteEntry)
 	r.GET("/draw", drawLottery)
 	r.GET("/openapi.yaml", serveOpenAPI)
 	r.GET("/swagger", serveSwaggerUI)
@@ -161,6 +163,33 @@ func addEntry(c *gin.Context) {
 	copy(snapshot, entries)
 	entriesMu.Unlock()
 	c.JSON(http.StatusCreated, entry)
+	go func() { _ = saveEntriesSnapshot(snapshot) }()
+}
+
+func deleteEntry(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "entry id required"})
+		return
+	}
+	entriesMu.Lock()
+	var kept []LotteryEntry
+	for _, e := range entries {
+		if e.ID != id {
+			kept = append(kept, e)
+		}
+	}
+	if len(kept) == len(entries) {
+		entriesMu.Unlock()
+		c.JSON(http.StatusNotFound, gin.H{"error": "entry not found"})
+		return
+	}
+	entries = kept
+	snapshot := make([]LotteryEntry, len(entries))
+	copy(snapshot, entries)
+	entriesMu.Unlock()
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	c.JSON(http.StatusOK, gin.H{"deleted": 1})
 	go func() { _ = saveEntriesSnapshot(snapshot) }()
 }
 
@@ -298,6 +327,21 @@ const landingHTML = `<!DOCTYPE html>
     button:hover, .btn:hover { background: var(--accent-hover); }
     button:active, .btn:active { transform: scale(0.98); }
     button:disabled { background: var(--surface2); color: var(--text-muted); cursor: not-allowed; transform: none; }
+    .btn-secondary { background: var(--surface2); color: var(--text); }
+    .btn-secondary:hover { background: var(--surface2); color: var(--accent); }
+    .entries-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+    .entries-section-header h2 { margin: 0; }
+    .entries-toolbar { display: flex; align-items: center; gap: 0.5rem; }
+    .btn-delete-small { font-size: 0.75rem; padding: 0.35rem 0.65rem; background: rgba(239, 68, 68, 0.2); color: var(--error); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; cursor: pointer; font-weight: 600; font-family: inherit; }
+    .btn-delete-small:hover { background: rgba(239, 68, 68, 0.3); }
+    .btn-delete-small:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-done-small { font-size: 0.75rem; padding: 0.35rem 0.65rem; background: var(--surface2); color: var(--text); border: 1px solid var(--surface2); border-radius: 6px; cursor: pointer; font-weight: 600; font-family: inherit; }
+    .btn-done-small:hover { color: var(--accent); }
+    .entry-delete-btn { background: none; border: none; color: var(--error); cursor: pointer; padding: 0; line-height: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; height: 1.25rem; width: 1.25rem; }
+    .entry-delete-btn:hover { background: var(--error-bg); color: var(--error); }
+    .entry-delete-btn .icon-minus-circle { width: 1.25rem; height: 1.25rem; display: block; vertical-align: middle; }
+    .col-check, .col-delete { width: 2.25rem; text-align: right; padding-left: 0.25rem; }
+    td.col-delete { vertical-align: middle; display: flex; align-items: center; justify-content: flex-end; padding-top: 0; padding-bottom: 0; }
     .msg {
       margin-top: 0.75rem;
       padding: 0.75rem 1rem;
@@ -413,7 +457,15 @@ const landingHTML = `<!DOCTYPE html>
     <div id="add-msg" class="msg" style="display:none;"></div>
   </section>
   <section>
-    <h2>Entries</h2>
+    <div class="entries-section-header">
+      <h2>Entries</h2>
+      <div class="entries-toolbar">
+        <button type="button" id="delete-entries-btn" class="btn-delete-small">Delete entries</button>
+        <span id="entries-actions" style="display:none;">
+          <button type="button" id="done-delete-btn" class="btn-done-small">Done</button>
+        </span>
+      </div>
+    </div>
     <div id="entries-list">Loading…</div>
   </section>
   <section>
@@ -440,6 +492,10 @@ const landingHTML = `<!DOCTYPE html>
     var winnerNameEl = document.getElementById('winner-name');
     var winnerTicketEl = document.getElementById('winner-ticket');
     var winnerDismiss = document.getElementById('winner-dismiss');
+    var currentEntries = [];
+    var deleteEntriesBtn = document.getElementById('delete-entries-btn');
+    var entriesActions = document.getElementById('entries-actions');
+    var doneDeleteBtn = document.getElementById('done-delete-btn');
 
     function hideWinnerBanner() {
       if (winnerOverlayTimer) { clearTimeout(winnerOverlayTimer); winnerOverlayTimer = null; }
@@ -493,22 +549,33 @@ const landingHTML = `<!DOCTYPE html>
       drawMsgTimer = setTimeout(hideDrawMsg, MSG_AUTO_HIDE_MS);
     }
 
+    function renderEntries(arr, deleteMode) {
+      if (arr.length === 0) {
+        entriesList.innerHTML = '<span class="empty">No entries yet.</span>';
+        entriesList.className = 'empty';
+        return;
+      }
+      entriesList.className = '';
+      var table = '<table><thead><tr><th>Name</th><th>Ticket</th>';
+      if (deleteMode) table += '<th class="col-delete"></th>';
+      table += '</tr></thead><tbody>';
+      arr.forEach(function(e) {
+        table += '<tr><td>' + escapeHtml(e.name) + '</td><td>' + escapeHtml(e.ticket) + '</td>';
+        if (deleteMode) table += '<td class="col-delete"><button type="button" class="entry-delete-btn" data-id="' + escapeHtml(e.id) + '" title="Delete entry"><svg class="icon-minus-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button></td>';
+        table += '</tr>';
+      });
+      table += '</tbody></table>';
+      entriesList.innerHTML = table;
+    }
     function loadEntries() {
+      entriesActions.style.display = 'none';
       fetch('/entries').then(function(r) { return r.json(); }).then(function(arr) {
-        if (arr.length === 0) {
-          entriesList.innerHTML = '<span class="empty">No entries yet.</span>';
-          entriesList.className = 'empty';
-        } else {
-          entriesList.className = '';
-          var table = '<table><thead><tr><th>Name</th><th>Ticket</th></tr></thead><tbody>';
-          arr.forEach(function(e) {
-            table += '<tr><td>' + escapeHtml(e.name) + '</td><td>' + escapeHtml(e.ticket) + '</td></tr>';
-          });
-          table += '</tbody></table>';
-          entriesList.innerHTML = table;
-        }
+        currentEntries = arr || [];
+        renderEntries(currentEntries, false);
+        if (deleteEntriesBtn) deleteEntriesBtn.disabled = currentEntries.length === 0;
       }).catch(function() {
         entriesList.innerHTML = '<span class="error">Failed to load entries.</span>';
+        if (deleteEntriesBtn) deleteEntriesBtn.disabled = true;
       });
     }
     function escapeHtml(s) {
@@ -568,6 +635,30 @@ const landingHTML = `<!DOCTYPE html>
       }).catch(function(err) {
         showDrawMsg('Request failed: ' + (err && err.message ? err.message : 'network error'), true);
       }).finally(function() { drawBtn.disabled = false; });
+    });
+
+    if (deleteEntriesBtn) deleteEntriesBtn.addEventListener('click', function() {
+      if (currentEntries.length === 0) return;
+      renderEntries(currentEntries, true);
+      entriesActions.style.display = 'inline-flex';
+    });
+    if (doneDeleteBtn) doneDeleteBtn.addEventListener('click', function() { loadEntries(); });
+    entriesList.addEventListener('click', function(ev) {
+      var btn = ev.target.closest('.entry-delete-btn');
+      if (!btn) return;
+      var id = btn.getAttribute('data-id');
+      if (!id) return;
+      btn.disabled = true;
+      fetch('/entries/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) {
+        if (r.ok) {
+          fetch('/entries').then(function(res) { return res.json(); }).then(function(arr) {
+            currentEntries = arr || [];
+            renderEntries(currentEntries, true);
+            if (deleteEntriesBtn) deleteEntriesBtn.disabled = currentEntries.length === 0;
+            if (currentEntries.length === 0) entriesActions.style.display = 'none';
+          });
+        }
+      }).catch(function() { loadEntries(); }).finally(function() { btn.disabled = false; });
     });
 
     loadEntries();
