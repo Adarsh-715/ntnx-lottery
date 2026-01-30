@@ -44,7 +44,7 @@ paths:
           description: Name already registered
   /entries/{id}:
     delete:
-      summary: Delete lottery entry in the system
+      summary: Delete lottery entry
       operationId: deleteEntry
       tags:
         - entries
